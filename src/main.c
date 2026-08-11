@@ -201,10 +201,10 @@ bool initiate() {
   uniform_buffer_descriptor.label = (WGPUStringView){"Uniform Buffer", WGPU_STRLEN};
   uniform_buffer_descriptor.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
   uniform_buffer.buffer_size =
-      // color buffer size
-      32 * 4 +
-      // translation buffer size
-      32 * MATRIX_SIZE;
+      // color buffer size (4 floats: R,G,B and A)
+      sizeof(float) * 4 +
+      // translation buffer size (16 floats)
+      sizeof(float) * MATRIX_SIZE;
   uniform_buffer_descriptor.size = uniform_buffer.buffer_size;
   uniform_buffer.buffer =
       wgpuDeviceCreateBuffer(wgpu_components.device, &uniform_buffer_descriptor);
@@ -225,8 +225,8 @@ bool initiate() {
   vertex_buffer_desc.label = (WGPUStringView){"Vertex Buffer", WGPU_STRLEN};
   vertex_buffer_desc.usage = WGPUBufferUsage_Vertex | WGPUBufferUsage_CopyDst;
   vertex_buffer.buffer_size =
-      // vertex buffer size
-      32 * 6;
+      // vertex buffer size (for now, only 6 floats for a triangle: 3 vertices within X and Y)
+      sizeof(float) * 6;
   vertex_buffer_desc.size = uniform_buffer.buffer_size;
   vertex_buffer.buffer =
       wgpuDeviceCreateBuffer(wgpu_components.device, &vertex_buffer_desc);
@@ -237,7 +237,7 @@ bool initiate() {
   vertex_buffer_layout.stepMode = WGPUVertexStepMode_Instance;
   vertex_buffer_layout.attributes = &vertex_attribute;
   vertex_buffer_layout.attributeCount = 1;
-  vertex_buffer_layout.arrayStride = 2 * 4; //2 floats (4 bytes each)
+  vertex_buffer_layout.arrayStride = sizeof(float) * 2;
   //wgpuRenderPassEncoderSetVertexBuffer(render_pass_encoder, 0, vertex_buffer, 0, vertex_buffer.buffer_size);
 
   wgpu_components.queue = wgpuDeviceGetQueue(wgpu_components.device);
