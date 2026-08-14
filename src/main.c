@@ -7,6 +7,7 @@
 #include <SDL3/SDL_render.h>
 #include <SDL3/SDL_scancode.h>
 #include <SDL3/SDL_video.h>
+#include <math.h>
 #include <sdl3webgpu/sdl3webgpu.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -15,8 +16,8 @@
 #include <transformations/transformations.h>
 #include <webgpu/webgpu.h>
 
-#define WINDOW_W 720
-#define WINDOW_H 720
+#define WINDOW_W 720.0
+#define WINDOW_H 720.0
 
 #define MATRIX_SIZE 16
 
@@ -28,11 +29,7 @@ struct WGPU_Components {
   WGPURenderPipeline render_pipeline;
   WGPUBindGroup bind_group;
   WGPUQueue queue;
-};
-
-struct WGPU_Buffer {
-  WGPUBuffer buffer;
-  int buffer_size;
+  WGPUVertexState vertex_state;
 };
 
 struct SDL_Components {
@@ -68,15 +65,10 @@ static struct Uniform_Values uniform_default_values = {{0.1, 0, 1.0, 1.0},
                                                            0,
                                                            1,
                                                        }};
-float vertex[] = {
-  0.0, 0.5,
-  -0.5, -0.5,
-  0.5, -0.5
-};
+float vertex_buffer_values[] = {0.0, 0.5, 0, -0.5, -0.5, 0, 0.5, -0.5, 0};
 static struct WGPU_Components wgpu_components = {NULL};
-static struct WGPU_Buffer uniform_buffer = {NULL};
-static struct WGPU_Buffer vertex_buffer = {NULL};
-
+static WGPUBuffer uniform_buffer = {NULL};
+static WGPUBuffer vertex_buffer = {NULL};
 
 static struct SDL_Components sdl_components = {NULL};
 
@@ -90,6 +82,15 @@ void device_callback(WGPURequestDeviceStatus status, WGPUDevice device,
                      WGPUStringView message, void *userdata1, void *userdata2);
 void update_player_transformation(float *directions, float *rotations,
                                   float *scalings);
+
+void print_matrix(float *matrix) {
+  for (int i = 1; i <= MATRIX_SIZE; i++) {
+    if (i % (int)sqrt(MATRIX_SIZE) == 0) {
+      printf("x:%f, y:%f, z:%f\n", matrix[i - 4], matrix[i - 3], matrix[i - 2]);
+    }
+  }
+  puts("");
+}
 
 int main() {
 
@@ -176,10 +177,32 @@ bool initiate() {
   wgpu_components.shader_module =
       wgpuDeviceCreateShaderModule(wgpu_components.device, &shader_desc);
 
+  // preparing vertex buffer
+  WGPUBufferDescriptor vertex_buffer_desc = WGPU_BUFFER_DESCRIPTOR_INIT;
+  vertex_buffer_desc.label = (WGPUStringView){"Vertex Buffer", WGPU_STRLEN};
+  vertex_buffer_desc.usage = WGPUBufferUsage_Vertex | WGPUBufferUsage_CopyDst;
+  vertex_buffer_desc.size = sizeof(vertex_buffer_values);
+  vertex_buffer =
+      wgpuDeviceCreateBuffer(wgpu_components.device, &vertex_buffer_desc);
+  WGPUVertexAttribute vertex_attribute = WGPU_VERTEX_ATTRIBUTE_INIT;
+  vertex_attribute.format = WGPUVertexFormat_Float32x3;
+  vertex_attribute.shaderLocation = 0;
+  WGPUVertexBufferLayout vertex_buffer_layout = WGPU_VERTEX_BUFFER_LAYOUT_INIT;
+  vertex_buffer_layout.stepMode = WGPUVertexStepMode_Vertex;
+  vertex_buffer_layout.attributes = &vertex_attribute;
+  vertex_buffer_layout.attributeCount = 1;
+  vertex_buffer_layout.arrayStride = sizeof(float) * 3;
+
+  // preparing vertex state, using vertex buffer layout
+  wgpu_components.vertex_state = WGPU_VERTEX_STATE_INIT;
+  wgpu_components.vertex_state.bufferCount = 1;
+  wgpu_components.vertex_state.buffers = &vertex_buffer_layout;
+  wgpu_components.vertex_state.entryPoint = (WGPUStringView){"vs", WGPU_STRLEN};
+
   WGPURenderPipelineDescriptor render_pipeline_desc =
       WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+  render_pipeline_desc.vertex = wgpu_components.vertex_state;
   render_pipeline_desc.vertex.module = wgpu_components.shader_module;
-  render_pipeline_desc.vertex.entryPoint = (WGPUStringView){"vs", WGPU_STRLEN};
   WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
   fragment.module = wgpu_components.shader_module;
   fragment.entryPoint = (WGPUStringView){"fs", WGPU_STRLEN};
@@ -198,47 +221,24 @@ bool initiate() {
 
   // preparing uniforms buffer
   WGPUBufferDescriptor uniform_buffer_descriptor = WGPU_BUFFER_DESCRIPTOR_INIT;
-  uniform_buffer_descriptor.label = (WGPUStringView){"Uniform Buffer", WGPU_STRLEN};
-  uniform_buffer_descriptor.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
-  uniform_buffer.buffer_size =
-      // color buffer size (4 floats: R,G,B and A)
-      sizeof(float) * 4 +
-      // translation buffer size (16 floats)
-      sizeof(float) * MATRIX_SIZE;
-  uniform_buffer_descriptor.size = uniform_buffer.buffer_size;
-  uniform_buffer.buffer =
-      wgpuDeviceCreateBuffer(wgpu_components.device, &uniform_buffer_descriptor);
+  uniform_buffer_descriptor.label =
+      (WGPUStringView){"Uniform Buffer", WGPU_STRLEN};
+  uniform_buffer_descriptor.usage =
+      WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+  uniform_buffer_descriptor.size = sizeof(uniform_default_values);
+  uniform_buffer = wgpuDeviceCreateBuffer(wgpu_components.device,
+                                          &uniform_buffer_descriptor);
   WGPUBindGroupEntry bind_group_entry = WGPU_BIND_GROUP_ENTRY_INIT;
   bind_group_entry.binding = 0;
-  bind_group_entry.buffer = uniform_buffer.buffer;
-  WGPUBindGroupDescriptor uniform_buffer_bind_group_desc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+  bind_group_entry.buffer = uniform_buffer;
+  WGPUBindGroupDescriptor uniform_buffer_bind_group_desc =
+      WGPU_BIND_GROUP_DESCRIPTOR_INIT;
   uniform_buffer_bind_group_desc.entries = &bind_group_entry;
   uniform_buffer_bind_group_desc.entryCount = 1;
   uniform_buffer_bind_group_desc.layout =
       wgpuRenderPipelineGetBindGroupLayout(wgpu_components.render_pipeline, 0);
-  wgpu_components.bind_group =
-      wgpuDeviceCreateBindGroup(wgpu_components.device, &uniform_buffer_bind_group_desc);
-  
-  // TODO: create vertex buffer
-  // preparing vertex buffer
-  WGPUBufferDescriptor vertex_buffer_desc = WGPU_BUFFER_DESCRIPTOR_INIT;
-  vertex_buffer_desc.label = (WGPUStringView){"Vertex Buffer", WGPU_STRLEN};
-  vertex_buffer_desc.usage = WGPUBufferUsage_Vertex | WGPUBufferUsage_CopyDst;
-  vertex_buffer.buffer_size =
-      // vertex buffer size (for now, only 6 floats for a triangle: 3 vertices within X and Y)
-      sizeof(float) * 6;
-  vertex_buffer_desc.size = uniform_buffer.buffer_size;
-  vertex_buffer.buffer =
-      wgpuDeviceCreateBuffer(wgpu_components.device, &vertex_buffer_desc);
-  WGPUVertexAttribute vertex_attribute = WGPU_VERTEX_ATTRIBUTE_INIT;
-  vertex_attribute.format = WGPUVertexFormat_Float32x2;
-  vertex_attribute.shaderLocation = 0;
-  WGPUVertexBufferLayout vertex_buffer_layout = WGPU_VERTEX_BUFFER_LAYOUT_INIT;
-  vertex_buffer_layout.stepMode = WGPUVertexStepMode_Instance;
-  vertex_buffer_layout.attributes = &vertex_attribute;
-  vertex_buffer_layout.attributeCount = 1;
-  vertex_buffer_layout.arrayStride = sizeof(float) * 2;
-  //wgpuRenderPassEncoderSetVertexBuffer(render_pass_encoder, 0, vertex_buffer, 0, vertex_buffer.buffer_size);
+  wgpu_components.bind_group = wgpuDeviceCreateBindGroup(
+      wgpu_components.device, &uniform_buffer_bind_group_desc);
 
   wgpu_components.queue = wgpuDeviceGetQueue(wgpu_components.device);
 
@@ -250,8 +250,8 @@ void main_loop() {
   bool is_running = true;
   Sint16 left_axis_x, left_axis_y, right_axis_x, right_axis_y;
 
-  float directions[] = {0, 0};
-  float rotations[] = {0, 0};
+  float directions[] = {0, 0, 1};
+  float rotations[] = {0, 0, 0};
   float scalings[] = {1, 1};
 
   float *translation_matrix = NULL;
@@ -293,19 +293,28 @@ void main_loop() {
     }
 
     update_player_transformation(directions, rotations, scalings);
-    translation_matrix = apply_rotation(rotations[0], rotations[1], 0);
-    rotation_matrix = apply_translation(directions[0], directions[1], 0);
+    translation_matrix =
+        apply_rotation(rotations[0], rotations[1], rotations[2]);
+    rotation_matrix =
+        apply_translation(directions[0], directions[1], directions[2]);
     scaling_matrix = apply_scaling(scalings[0], scalings[1], 0);
 
     transformation_matrix =
         multiply_matrices(scaling_matrix, translation_matrix);
     transformation_matrix =
         multiply_matrices(transformation_matrix, rotation_matrix);
+
+    //apply_perspective(transformation_matrix);
+    normalize_matrix(transformation_matrix);
+    print_matrix(transformation_matrix);
     memcpy(uniform_default_values.transform, transformation_matrix,
            sizeof(float) * MATRIX_SIZE);
 
-    wgpuQueueWriteBuffer(wgpu_components.queue, uniform_buffer.buffer, 0,
-                         &uniform_default_values, uniform_buffer.buffer_size);
+    wgpuQueueWriteBuffer(wgpu_components.queue, vertex_buffer, 0,
+                         vertex_buffer_values, sizeof(vertex_buffer_values));
+    wgpuQueueWriteBuffer(wgpu_components.queue, uniform_buffer, 0,
+                         &uniform_default_values,
+                         sizeof(uniform_default_values));
 
     WGPUSurfaceTexture surface_texture = WGPU_SURFACE_TEXTURE_INIT;
     wgpuSurfaceGetCurrentTexture(wgpu_components.surface, &surface_texture);
@@ -334,15 +343,19 @@ void main_loop() {
         WGPU_RENDER_PASS_DESCRIPTOR_INIT;
     render_pass_desc.colorAttachmentCount = 1;
     render_pass_desc.colorAttachments = &color_attachment;
+    // A render pass encoder
     WGPURenderPassEncoder render_pass_encoder =
         wgpuCommandEncoderBeginRenderPass(command_encoder, &render_pass_desc);
 
     wgpuRenderPassEncoderSetPipeline(render_pass_encoder,
                                      wgpu_components.render_pipeline);
+
+    wgpuRenderPassEncoderSetVertexBuffer(render_pass_encoder, 0, vertex_buffer,
+                                         0, sizeof(vertex_buffer_values));
+
     wgpuRenderPassEncoderSetBindGroup(render_pass_encoder, 0,
                                       wgpu_components.bind_group, 0, 0);
     wgpuRenderPassEncoderDraw(render_pass_encoder, 3, 1, 0, 0);
-
     wgpuRenderPassEncoderEnd(render_pass_encoder);
 
     WGPUCommandBufferDescriptor command_buffer_desc =
@@ -363,7 +376,7 @@ void main_loop() {
 
 void terminate() {
   wgpuBindGroupRelease(wgpu_components.bind_group);
-  wgpuBufferRelease(uniform_buffer.buffer);
+  wgpuBufferRelease(uniform_buffer);
   wgpuRenderPipelineRelease(wgpu_components.render_pipeline);
   wgpuSurfaceUnconfigure(wgpu_components.surface);
   wgpuSurfaceRelease(wgpu_components.surface);
@@ -428,9 +441,15 @@ void update_player_transformation(float *directions, float *rotations,
     directions[0] += -0.1;
   }
   if (key_states[SDL_SCANCODE_W]) {
-    directions[1] += 0.1;
+    directions[2] += 0.1;
   }
   if (key_states[SDL_SCANCODE_S]) {
+    directions[2] += -0.1;
+  }
+  if (key_states[SDL_SCANCODE_E]) {
+    directions[1] += 0.1;
+  }
+  if (key_states[SDL_SCANCODE_Q]) {
     directions[1] += -0.1;
   }
 
@@ -446,6 +465,12 @@ void update_player_transformation(float *directions, float *rotations,
   }
   if (key_states[SDL_SCANCODE_RIGHT]) {
     rotations[0] += 0.1;
+  }
+  if (key_states[SDL_SCANCODE_RSHIFT]) {
+    rotations[2] += 0.1;
+  }
+  if (key_states[SDL_SCANCODE_RCTRL]) {
+    rotations[2] += -0.1;
   }
 
   // scaling
