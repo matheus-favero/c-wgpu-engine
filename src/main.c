@@ -16,10 +16,14 @@
 #include <transformations/transformations.h>
 #include <webgpu/webgpu.h>
 
-#define WINDOW_W 720.0
-#define WINDOW_H 720.0
+#define WINDOW_W 720
+#define WINDOW_H 720
 
 #define MATRIX_SIZE 16
+
+#define RGBA_RED 1, 0, 0, 1
+#define RGBA_GREEN 0, 1, 0, 1
+#define RGBA_BLUE 0, 0, 1, 1
 
 struct WGPU_Components {
   WGPUInstance instance;
@@ -37,35 +41,43 @@ struct SDL_Components {
   SDL_Gamepad *gamepad;
 };
 
-struct Uniform_Values {
+struct Uniforms_Values {
   float color[4];
   float transform[16];
+};
+
+struct Attributes_Values {
+  float vertex_positions[9];
+  float vertex_colors[36];
 };
 
 struct Player_Info {
   float vertex_position;
 };
 
-static struct Uniform_Values uniform_default_values = {{0.1, 0, 1.0, 1.0},
-                                                       {
-                                                           1,
-                                                           0,
-                                                           0,
-                                                           0,
-                                                           0,
-                                                           1,
-                                                           0,
-                                                           0,
-                                                           0,
-                                                           0,
-                                                           1,
-                                                           0,
-                                                           0,
-                                                           0,
-                                                           0,
-                                                           1,
-                                                       }};
-float vertex_buffer_values[] = {0.0, 0.5, 0, -0.5, -0.5, 0, 0.5, -0.5, 0};
+static struct Uniforms_Values uniform_default_values = {{0.1, 0, 1.0, 1.0},
+                                                        {
+                                                            1,
+                                                            0,
+                                                            0,
+                                                            0,
+                                                            0,
+                                                            1,
+                                                            0,
+                                                            0,
+                                                            0,
+                                                            0,
+                                                            1,
+                                                            0,
+                                                            0,
+                                                            0,
+                                                            0,
+                                                            1,
+                                                        }};
+static struct Attributes_Values vertex_buffer_values = {
+    {0.0, 0.5, 0, -0.5, -0.5, 0, 0.5, -0.5, 0},
+    {RGBA_RED, RGBA_GREEN, RGBA_BLUE, RGBA_RED, RGBA_GREEN, RGBA_BLUE, RGBA_RED,
+     RGBA_GREEN, RGBA_BLUE}};
 static struct WGPU_Components wgpu_components = {NULL};
 static WGPUBuffer uniform_buffer = {NULL};
 static WGPUBuffer vertex_buffer = {NULL};
@@ -177,7 +189,8 @@ bool initiate() {
   wgpu_components.shader_module =
       wgpuDeviceCreateShaderModule(wgpu_components.device, &shader_desc);
 
-  // preparing vertex buffer
+  // Preparing vertex buffer
+  // TODO: preciso colocar a cor e a posição dentro do mesmo buffer
   WGPUBufferDescriptor vertex_buffer_desc = WGPU_BUFFER_DESCRIPTOR_INIT;
   vertex_buffer_desc.label = (WGPUStringView){"Vertex Buffer", WGPU_STRLEN};
   vertex_buffer_desc.usage = WGPUBufferUsage_Vertex | WGPUBufferUsage_CopyDst;
@@ -193,7 +206,7 @@ bool initiate() {
   vertex_buffer_layout.attributeCount = 1;
   vertex_buffer_layout.arrayStride = sizeof(float) * 3;
 
-  // preparing vertex state, using vertex buffer layout
+  // Preparing vertex state, using vertex buffer layout
   wgpu_components.vertex_state = WGPU_VERTEX_STATE_INIT;
   wgpu_components.vertex_state.bufferCount = 1;
   wgpu_components.vertex_state.buffers = &vertex_buffer_layout;
@@ -304,14 +317,14 @@ void main_loop() {
     transformation_matrix =
         multiply_matrices(transformation_matrix, rotation_matrix);
 
-    //apply_perspective(transformation_matrix);
+    // apply_perspective(transformation_matrix);
     normalize_matrix(transformation_matrix);
     print_matrix(transformation_matrix);
     memcpy(uniform_default_values.transform, transformation_matrix,
            sizeof(float) * MATRIX_SIZE);
 
     wgpuQueueWriteBuffer(wgpu_components.queue, vertex_buffer, 0,
-                         vertex_buffer_values, sizeof(vertex_buffer_values));
+                         &vertex_buffer_values, sizeof(vertex_buffer_values));
     wgpuQueueWriteBuffer(wgpu_components.queue, uniform_buffer, 0,
                          &uniform_default_values,
                          sizeof(uniform_default_values));
